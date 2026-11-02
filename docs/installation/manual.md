@@ -47,6 +47,18 @@ cd wetype-linux
 sudo ./scripts/install.sh
 ```
 
+安装的文件：
+
+```text
+/usr/bin/wetype-daemon
+/usr/lib/fcitx5/libwetype.so
+/usr/share/fcitx5/addon/wetype.conf
+/usr/share/fcitx5/inputmethod/wetype.conf
+/usr/share/icons/hicolor/*/apps/fcitx-wetype.png
+/usr/share/wetype/engine/ # 引擎本体与 wetype-engine.exe
+/usr/lib/systemd/user/wetype-daemon.service
+```
+
 ## 5. 检查服务
 
 ```sh
