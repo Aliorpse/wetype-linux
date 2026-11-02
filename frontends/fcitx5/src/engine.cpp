@@ -76,7 +76,7 @@ State::~State() {
     }
 }
 
-bool State::ensureSession(fcitx::InputContext &) {
+bool State::ensureSession(fcitx::InputContext &ic) {
     const uint64_t connection = wetype_generation(handle_.get());
     if (session_ != 0 && connection_ != connection) {
         // The daemon restarted, and every session died with it. Session ids are
@@ -87,11 +87,16 @@ bool State::ensureSession(fcitx::InputContext &) {
     if (session_ != 0) {
         return true;
     }
-    // NOTE: app name is empty for now. fcitx5 can report the program name via
-    // InputContext::program(); wiring it through needs a test on a real desktop
-    // (the engine uses it for per-app scene decisions).
+    // The engine uses the foreground program for its own scene decisions. The
+    // daemon rejects names over 256 bytes, and a rejected session would make
+    // every key fall through, so clamp here instead.
+    constexpr std::size_t kMaxAppName = 256;
+    std::string app = ic.program();
+    if (app.size() > kMaxAppName) {
+        app.resize(kMaxAppName);
+    }
     uint64_t session = 0;
-    if (wetype_new_session(handle_.get(), 0, "", &session) != 0) {
+    if (wetype_new_session(handle_.get(), 0, app.c_str(), &session) != 0) {
         return false;
     }
     session_ = session;

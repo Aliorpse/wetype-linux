@@ -6,6 +6,7 @@
 //!
 //! ```text
 //! wetype-cli --engine libs/engine/wetype-engine.exe --keys nihao
+//! wetype-cli --engine libs/engine/wetype-engine.exe --app firefox --keys nihao
 //! ```
 
 use std::io::{BufReader, Read, Write};
@@ -143,6 +144,7 @@ fn main() -> Result<()> {
     let mut steal: Option<u64> = None;
     let mut linger: u64 = 0;
     let mut do_reset = false;
+    let mut app = String::new();
     // Which candidate to select. Without it the first non-empty row is picked,
     // which is a whole-word candidate; partial selection needs an explicit one.
     let mut pick_override: Option<usize> = None;
@@ -157,6 +159,7 @@ fn main() -> Result<()> {
             "--linger" => linger = args.next().and_then(|v| v.parse().ok()).unwrap_or(0),
             "--reset" => do_reset = true,
             "--pick" => pick_override = args.next().and_then(|v| v.parse().ok()),
+            "--app" => app = args.next().unwrap_or_default(),
             other => bail!("unknown argument {other}"),
         }
     }
@@ -208,7 +211,7 @@ fn main() -> Result<()> {
 
     let created = conn.call(ipc::request::Kind::NewSession(ipc::NewSession {
         ctx_id: 1,
-        app_name: String::new(),
+        app_name: app,
     }))?;
     let session = match created.kind {
         Some(ipc::response::Kind::Created(c)) => c.session,
