@@ -3,7 +3,7 @@
 > [!WARNING]
 > 个人项目，作者相关领域知识较弱，代码主要由 LLM 生成。
 
-Linux 微信输入法兼容层，微信输入法的 Windows 引擎通过 Wine 原生加载。
+Linux x86-64 微信输入法兼容层，其 Windows 引擎通过 Wine 加载。
 
 ## 功能
 
