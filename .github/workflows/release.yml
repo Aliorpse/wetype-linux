@@ -1,0 +1,114 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - run: cargo test --workspace --locked
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check tag
+        run: |
+          set -eu
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $version"
+            exit 1
+          fi
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::tag $GITHUB_REF_NAME is not on main"
+            exit 1
+          fi
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes
+          fi
+
+  aur:
+    needs: release
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    env:
+      PKGBASE: wetype-linux
+    steps:
+      - name: Install packages
+        run: pacman -Syu --noconfirm --needed base-devel git openssh
+
+      - uses: actions/checkout@v4
+
+      - name: Generate .SRCINFO
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          work=/tmp/aur-src
+          mkdir -p "$work"
+          cp packaging/aur/PKGBUILD packaging/aur/wetype-linux.install "$work/"
+          sed -i "s/^pkgver=.*/pkgver=$version/" "$work/PKGBUILD"
+
+          # makepkg refuses to run as root; --printsrcinfo only parses the file.
+          useradd -m builder
+          chown -R builder "$work"
+          su -s /bin/sh builder -c "cd '$work' && makepkg --printsrcinfo > .SRCINFO"
+
+          install -m644 "$work/PKGBUILD" /tmp/PKGBUILD
+          install -m644 "$work/.SRCINFO" /tmp/.SRCINFO
+
+      - name: Push to AUR
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          install -d -m700 "$HOME/.ssh"
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$HOME/.ssh/aur"
+          chmod 600 "$HOME/.ssh/aur"
+          ssh-keyscan aur.archlinux.org >> "$HOME/.ssh/known_hosts"
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/aur -o IdentitiesOnly=yes"
+
+          # Cloning a package that does not exist yet fails; create the repo
+          # locally and let the first push register the package on AUR.
+          if ! git clone "ssh://aur@aur.archlinux.org/$PKGBASE.git" aur-repo; then
+            rm -rf aur-repo
+            mkdir aur-repo
+            git -C aur-repo init -b master
+            git -C aur-repo remote add origin "ssh://aur@aur.archlinux.org/$PKGBASE.git"
+          fi
+
+          cp /tmp/PKGBUILD aur-repo/PKGBUILD
+          cp /tmp/.SRCINFO aur-repo/.SRCINFO
+          cp packaging/aur/wetype-linux.install aur-repo/wetype-linux.install
+          cd aur-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add PKGBUILD .SRCINFO wetype-linux.install
+          if git diff --cached --quiet; then
+            echo "AUR is already up to date"
+            exit 0
+          fi
+          git commit -m "update to $GITHUB_REF_NAME"
+          git push origin HEAD:master

@@ -13,6 +13,7 @@ members = [
 version = "0.1.0+wetype3.0.2.22"
 edition = "2024"
 license = "MIT"
+publish = false
 
 # Every version lives here so the crates cannot drift apart. Members refer to
 # these with `foo.workspace = true` and only add what is crate-specific

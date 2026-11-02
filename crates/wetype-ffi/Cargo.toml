@@ -3,6 +3,7 @@ name = "wetype-ffi"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 
 [lib]
 # staticlib for Meson to link into the fcitx5 addon; cdylib for anything that
