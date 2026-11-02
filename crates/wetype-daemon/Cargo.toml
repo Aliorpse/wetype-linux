@@ -1,0 +1,27 @@
+[package]
+name = "wetype-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+bytes.workspace = true
+futures-util = { workspace = true, features = ["sink"] }
+prost.workspace = true
+# The daemon is the only crate with an async runtime; the engine host stays
+# blocking on purpose and the client owns its own reader thread.
+tokio = { workspace = true, features = [
+    "rt-multi-thread",
+    "macros",
+    "io-util",
+    "net",
+    "process",
+    "sync",
+    "signal",
+    "time",
+] }
+tokio-util.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+wetype-types = { path = "../wetype-types" }

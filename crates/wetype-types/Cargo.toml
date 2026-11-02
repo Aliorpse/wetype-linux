@@ -1,0 +1,18 @@
+[package]
+name = "wetype-types"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+bytes.workspace = true
+prost.workspace = true
+tokio-util.workspace = true
+
+[build-dependencies]
+prost-build.workspace = true
+
+# prost-build is only referenced from build.rs, which cargo-machete reports as
+# unused. It is load-bearing: without it there is no generated ipc module.
+[package.metadata.cargo-machete]
+ignored = ["prost-build"]

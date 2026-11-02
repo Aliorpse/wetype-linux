@@ -1,0 +1,16 @@
+# Rust build output
+/target
+
+# Fetched WeType payload and installer cache
+/bin/
+
+# Editor state (not ours to delete, but not ours to commit either)
+/.idea/
+
+# Local run artefacts (install staging, scratch work directories, wine prefix)
+/.run/
+/.wineprefix/
+/.install/
+
+# Meson build directories
+/frontends/*/build/

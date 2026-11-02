@@ -1,0 +1,35 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/wetype-cli",
+    "crates/wetype-client",
+    "crates/wetype-daemon",
+    "crates/wetype-engine",
+    "crates/wetype-ffi",
+    "crates/wetype-types",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+# Every version lives here so the crates cannot drift apart. Members refer to
+# these with `foo.workspace = true` and only add what is crate-specific
+# (an extra feature, `optional`, and so on).
+[workspace.dependencies]
+anyhow = "1.0.104"
+bytes = "1.12.1"
+futures-util = "0.3.34"
+libloading = "0.9.0"
+prost = "0.14.4"
+prost-build = "0.14.4"
+serde_json = "1.0.154"
+tokio = "1.54.1"
+# The framing codec is needed by every hop, so the feature lives here.
+tokio-util = { version = "0.7.20", features = ["codec"] }
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"
+
+# Only used by the header generator, behind a feature.
+cbindgen = "0.29.4"

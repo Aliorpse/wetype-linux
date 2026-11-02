@@ -1,0 +1,37 @@
+[Unit]
+Description=WeType input method engine (Wine)
+# The engine is a Wine process, so this unit owns the whole pair. A crashed
+# engine makes the daemon exit non-zero on purpose; see "引擎监督" in README.
+StartLimitIntervalSec=30
+StartLimitBurst=10
+
+[Service]
+Type=simple
+ExecStart=@BINDIR@/wetype-daemon
+
+# scripts/install.sh renders this template: the engine ships under /usr, while
+# the writable state (dictionaries, Wine prefix) goes to %S, which systemd
+# expands to the user's state directory (~/.local/state).
+Environment=WINEDEBUG=-all
+Environment=WINEPREFIX=@WINEPREFIX@
+Environment=WETYPE_ENGINE_DIR=@ENGINE_DIR@
+Environment=WETYPE_DATA_DIR=@DATA_DIR@
+
+# No WETYPE_SOCKET: the daemon defaults to $XDG_RUNTIME_DIR/wetype.sock, which
+# the user manager already sets and the addon resolves to the same path.
+
+# A crashed engine leaves the daemon unable to serve anything, and the daemon
+# exits 1 so the pair is restarted. Three seconds is also the client's retry
+# cadence, so the addon reconnects by itself without a fcitx5 restart.
+Restart=on-failure
+RestartSec=3
+
+# SIGTERM only to the daemon: it then closes the engine's stdin so Wine can run
+# wxime_finalize. A control-group SIGTERM would kill the engine first and skip
+# that teardown (the deadlock documented in README). Anything still alive after
+# the timeout is SIGKILLed.
+KillMode=mixed
+TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target

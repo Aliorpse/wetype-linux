@@ -1,0 +1,23 @@
+[package]
+name = "wetype-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+# staticlib for Meson to link into the fcitx5 addon; cdylib for anything that
+# wants to dlopen/ctypes it later; rlib so tests can call it directly.
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "wetype-ffi-header"
+path = "src/bin/header.rs"
+required-features = ["cbindgen"]
+
+[dependencies]
+cbindgen = { workspace = true, optional = true }
+wetype-client = { path = "../wetype-client" }
+wetype-types = { path = "../wetype-types" }
+
+[features]
+cbindgen = ["dep:cbindgen"]

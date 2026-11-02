@@ -1,0 +1,180 @@
+// Wire protocol between the fcitx5 addon and wetype-daemon,
+// and between wetype-daemon and wetype-engine.exe (identical framing).
+//
+// Path matches the package (`wetype.ipc` -> `wetype/ipc/`) per the protobuf
+// style guide's PACKAGE_DIRECTORY_MATCH rule.
+//
+// Framing is NOT part of this file: every message travels as one frame of
+// tokio-util's LengthDelimitedCodec (4-byte big-endian length prefix, then the
+// encoded protobuf). Engine logs never appear on the protocol channel; they go
+// to stderr / journald.
+//
+// Field numbers are frozen. Add new cases to the oneofs instead of renumbering.
+
+syntax = "proto3";
+
+package wetype.ipc;
+
+// ---------------------------------------------------------------- requests
+
+message Request {
+  // Monotonic per connection; the response echoes it so late replies after a
+  // reconnect can be dropped.
+  uint64 seq = 1;
+
+  oneof kind {
+    Ping         ping          = 10;
+    NewSession   new_session   = 11;
+    CloseSession close_session = 12;
+    Key          key           = 13;
+    Select       select        = 14;
+    Reset        reset         = 15;
+    Backspace    backspace     = 16;
+  }
+}
+
+// Health check / capability probe.
+message Ping {
+  // Protocol version the caller was built against.
+  uint32 protocol_version = 1;
+}
+
+// One engine session per fcitx5 input context. The daemon owns the session and
+// records which connection created it: a request naming a session that belongs
+// to another connection is rejected, and closing the connection closes the
+// sessions it created.
+message NewSession {
+  // fcitx5 input-context id, for daemon-side logging only.
+  uint32 ctx_id = 1;
+  // Foreground application name, e.g. "Weixin.exe". The engine uses this for
+  // its own scene decisions; empty is acceptable.
+  string app_name = 2;
+}
+
+message CloseSession {
+  uint64 session = 1;
+}
+
+// Exactly one printable, non-space ASCII byte per Key.
+//
+// The engine throws a C++ exception - which kills the whole engine process,
+// taking every session with it - if it receives anything else: a whole syllable,
+// a multibyte codepoint, a stray non-ASCII byte, or a space. The engine host
+// rejects such a request instead of forwarding it.
+message Key {
+  uint64 session = 1;
+  // One byte, 0x21..=0x7E. Space is excluded because the engine cannot handle
+  // it; every frontend resolves Enter/Space itself.
+  bytes utf8 = 2;
+}
+
+// Selection is by INDEX into the snapshot the engine host already holds, so the
+// client never echoes engine-private bytes back.
+//
+// `generation` is the value from the Candidates response the index came from;
+// a stale generation is rejected instead of selecting the wrong word after the
+// candidate list has moved on.
+message Select {
+  uint64 session    = 1;
+  uint64 generation = 2;
+  uint32 index      = 3;
+}
+
+message Reset {
+  uint64 session = 1;
+}
+
+// Backspace, forwarded to wxime_drop_last. Named Backspace rather than Drop so
+// it cannot be confused with dropping (closing) a session.
+message Backspace {
+  uint64 session = 1;
+  uint32 count   = 2;
+}
+
+// --------------------------------------------------------------- responses
+
+message Response {
+  uint64 seq = 1;
+  bool   ok  = 2;
+  // Populated when ok == false.
+  string error = 3;
+
+  oneof kind {
+    Pong         pong          = 10;
+    SessionCreated created     = 11;
+    Candidates   candidates    = 12;
+    SelectResult select_result = 13;
+    Ack          ack           = 14;
+  }
+}
+
+message Pong {
+  uint32 protocol_version = 1;
+  // Engine version string as reported by wxime_get_version().
+  string engine_version = 2;
+}
+
+message SessionCreated {
+  uint64 session = 1;
+}
+
+// Snapshot of the candidate list. The engine hands out an iterator that is only
+// valid during the listener callback, so the engine host copies everything it
+// needs and frees the iterator before replying - no iterator pointer ever
+// crosses the wire.
+message Candidates {
+  uint64 session = 1;
+  // Bumped for every stored snapshot; pass it back in Select.
+  uint64 generation = 2;
+  repeated Candidate items = 3;
+  // True when the list was cut short at the requested page size.
+  bool truncated = 4;
+  // Composition string as the engine wants it displayed (event type 5).
+  // Empty when there is no composition.
+  bytes preedit = 5;
+  // Cursor offset inside preedit, in bytes.
+  uint32 cursor = 6;
+  // Text the engine emitted for immediate commit during this keystroke
+  // (event type 2). Usually empty; punctuation and auto-commit produce it.
+  // The client commits it as-is and must not try to derive it itself.
+  bytes commit = 7;
+  // The composition without the separators the engine inserts for display:
+  // `preedit` is "ni'hao", `raw` is "nihao".
+  //
+  // This is what Enter must commit. Stripping separators client-side would be
+  // wrong, because an apostrophe the user actually typed has to survive.
+  bytes raw = 8;
+}
+
+message Candidate {
+  // Display / commit text for this candidate.
+  bytes  text  = 1;
+  // How many characters of `raw` this candidate consumes (candidate +0x64).
+  // When cover < len(raw) the selection commits only that prefix and the rest
+  // keeps composing. 0 and 0xFFFFFFFF mean "unknown"; treat as whole word.
+  uint32 cover = 2;
+  // Marker 0xFFFD with origin 11000 means a cloud candidate.
+  bool   cloud = 3;
+  // Display comment (English gloss / emotion name), when the engine provides it.
+  bytes  comment = 4;
+}
+
+// Result of a selection. The client must NOT accumulate text itself: whatever
+// belongs on screen right now is in `commit`, decided by the engine host.
+//
+// A candidate whose `cover` is shorter than `raw` commits only that prefix.
+// The engine host then resets the session and replays the uncovered keys, so
+// the composition that is left is a normal one and arrives in `rest` - the
+// frontend never has to rebuild it from pinyin itself.
+message SelectResult {
+  // Text to hand to the application now. May be empty.
+  bytes  commit   = 1;
+  reserved 2, 3;
+  // True when the composition ended (session was reset); `rest` is unset then.
+  bool   finished = 4;
+  // The composition that is still open after a partial commit. Set exactly
+  // when `finished` is false.
+  Candidates rest = 5;
+}
+
+message Ack {}
