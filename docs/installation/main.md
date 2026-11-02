@@ -4,6 +4,9 @@
 
 ```
 yay -S wetype-linux
+systemctl --user daemon-reload
+systemctl --user enable --now wetype-daemon
+fcitx5 -r -d
 ```
 
 ## 其他发行版
