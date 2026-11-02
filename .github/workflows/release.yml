@@ -9,7 +9,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
@@ -21,7 +21,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -60,7 +60,7 @@ jobs:
       - name: Install packages
         run: pacman -Syu --noconfirm --needed base-devel git openssh
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Generate .SRCINFO
         run: |
@@ -84,11 +84,14 @@ jobs:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         run: |
           set -euo pipefail
-          install -d -m700 "$HOME/.ssh"
-          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$HOME/.ssh/aur"
-          chmod 600 "$HOME/.ssh/aur"
-          ssh-keyscan aur.archlinux.org >> "$HOME/.ssh/known_hosts"
-          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/aur -o IdentitiesOnly=yes"
+          ssh_dir=/tmp/aur-ssh
+          install -d -m700 "$ssh_dir"
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$ssh_dir/id"
+          chmod 600 "$ssh_dir/id"
+          # Pin the host key when keyscan works; accept-new only as a fallback
+          # (container jobs do not always share the caller's $HOME).
+          ssh-keyscan -T 10 aur.archlinux.org > "$ssh_dir/known_hosts" 2>/dev/null || true
+          export GIT_SSH_COMMAND="ssh -i $ssh_dir/id -o IdentitiesOnly=yes -o UserKnownHostsFile=$ssh_dir/known_hosts -o StrictHostKeyChecking=accept-new"
 
           # Cloning a package that does not exist yet fails; create the repo
           # locally and let the first push register the package on AUR.
