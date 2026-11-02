@@ -102,6 +102,15 @@ for icon in frontends/fcitx5/data/icons/hicolor/*/apps/fcitx-wetype.png; do
     install -Dm644 "$icon" "$destdir/usr/share/${icon#frontends/fcitx5/data/}"
 done
 
+# Refresh the hicolor cache so the icon shows up immediately. Only for a real
+# /usr install (the script is root there); a DESTDIR stage must not touch the
+# host cache.
+if [ -z "$destdir" ] && command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    echo "==> icon cache"
+    gtk-update-icon-cache -f -t /usr/share/icons/hicolor ||
+        echo "warning: gtk-update-icon-cache failed" >&2
+fi
+
 echo "==> engine payload"
 install -d "$destdir/usr/share/wetype/engine"
 cp -a "$engine_src/." "$destdir/usr/share/wetype/engine/"
