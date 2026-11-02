@@ -2,7 +2,7 @@
 # Fetch the WeType payload this source tree expects.
 #
 #   scripts/fetch_wetype.sh          # the version pinned in wetype.lock
-#   scripts/fetch_wetype.sh --update # newest version, rewrite wetype.lock
+#   scripts/fetch_wetype.sh --update # newest version; rewrite lock and version
 #   scripts/fetch_wetype.sh --check  # only report locked vs newest
 #   scripts/fetch_wetype.sh --version X # a specific version (no lock write)
 #   scripts/fetch_wetype.sh --force  # re-unpack even if already there
@@ -43,6 +43,27 @@ lock_get() {
 
 lock_set() {
     sed -i "s|\"$1\": \"[^\"]*\"|\"$1\": \"$2\"|" "$lock"
+}
+
+# The project version is <semver>+wetype<engine version>, so bumping the engine
+# has to bump it too. Cargo.lock pins the workspace members' versions, and the
+# Meson build uses --locked, so refresh it as well.
+sync_project_version() {
+    base=$(sed -n 's/^version = "\([^"+]*\).*/\1/p' "$root/Cargo.toml" | head -1)
+    [ -n "$base" ] || die "cannot read the workspace version from Cargo.toml"
+    new="$base+wetype$1"
+    sed -i "s|^version = \"[^\"]*\"$|version = \"$new\"|" "$root/Cargo.toml"
+    sed -i "s|^  version: '[^']*',$|  version: '$new',|" "$root/frontends/fcitx5/meson.build"
+    grep -q "version = \"$new\"" "$root/Cargo.toml" ||
+        die "could not update the workspace version in Cargo.toml"
+    grep -q "version: '$new'" "$root/frontends/fcitx5/meson.build" ||
+        die "could not update the project version in meson.build"
+    if command -v cargo >/dev/null 2>&1; then
+        (cd "$root" && cargo update --workspace --offline >/dev/null 2>&1) ||
+            (cd "$root" && cargo update --workspace >/dev/null 2>&1) ||
+            echo "warning: could not refresh Cargo.lock; run cargo update --workspace" >&2
+    fi
+    echo "project version: $new"
 }
 
 fetch_to() {
@@ -231,6 +252,7 @@ if [ "$update" -eq 1 ]; then
     lock_set url "$url"
     lock_set installer_sha256 "$installer_sha"
     lock_set engine_sha256 "$extracted_sha"
+    sync_project_version "$version"
     echo "wetype.lock updated to $version"
 fi
 

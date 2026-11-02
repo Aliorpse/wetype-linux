@@ -28,7 +28,9 @@ fcitx5 -r -d
 ./scripts/fetch_wetype.sh --update
 ```
 
-这会改写 `wetype.lock`。如需提交引擎版本改动，请单独提交 PR：
+这会改写 `wetype.lock`，并把 `Cargo.toml` / `meson.build` 里的项目版本同步成
+`<semver>+wetype<引擎版本>`（`Cargo.lock` 一并刷新）。如需提交引擎版本改动，请
+单独提交 PR：
 
 ```
 chore(update): Bump WeType engine from <旧版本号> to <新版本号>
