@@ -126,10 +126,17 @@ public:
     /// value means the daemon restarted and the session id is stale.
     uint64_t connection() const { return connection_; }
     void setConnection(uint64_t connection) { connection_ = connection; }
-    /// Forget a session the daemon no longer knows about. Deliberately does not
-    /// send CloseSession: the daemon that owned it is gone, and the id may
-    /// already belong to someone else.
-    void dropSession() { session_ = 0; }
+    /// Forget the session and ask the daemon to close it.
+    ///
+    /// If the daemon restarted, the id is unknown to it; if the id belongs to
+    /// another connection, the daemon rejects the close. Both cases are
+    /// harmless, and a live session is not leaked.
+    void dropSession() {
+        if (session_ != 0 && handle_) {
+            wetype_close_session(handle_.get(), session_);
+        }
+        session_ = 0;
+    }
 
     /// Text of the first candidate in the current snapshot, used when a
     /// punctuation key has to finish the composition.
