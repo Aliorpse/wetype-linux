@@ -47,6 +47,28 @@ FCITX_CONFIG_ENUM_NAME(CommitBehavior, "提交原始输入", "选第一个候选
 enum class PreeditMode { Panel, Client };
 FCITX_CONFIG_ENUM_NAME(PreeditMode, "fcitx5 显示", "应用内显示");
 
+/// Per-symbol punctuation switches.
+///
+/// A nested Configuration is rendered by fcitx5-configtool as one titled group
+/// box, so the dozen switches do not flatten the addon page.
+FCITX_CONFIGURATION(PunctuationConfig,
+    fcitx::Option<bool> comma{this, "Comma", "逗号  , → ，", true};
+    fcitx::Option<bool> period{this, "Period", "句号  . → 。", true};
+    fcitx::Option<bool> semicolon{this, "Semicolon", "分号  ; → ；", true};
+    fcitx::Option<bool> apostrophe{
+        this, "Apostrophe", "单引号  ' → ‘’（自动配对）", true};
+    fcitx::Option<bool> question{this, "Question", "问号  ? → ？", true};
+    fcitx::Option<bool> exclam{this, "Exclam", "叹号  ! → ！", true};
+    fcitx::Option<bool> colon{this, "Colon", "冒号  : → ：", true};
+    fcitx::Option<bool> quote{this, "Quote", "双引号  \" → “”（自动配对）", true};
+    // One switch for both halves: nobody wants only the left one.
+    fcitx::Option<bool> paren{this, "Paren", "括号  () → （）", true};
+    fcitx::Option<bool> bracket{this, "Bracket", "方括号  [] → 【】", true};
+    fcitx::Option<bool> brace{this, "Brace", "花括号  {} → 「」", true};
+    fcitx::Option<bool> angle{this, "Angle", "书名号  <> → 《》", true};
+    fcitx::Option<bool> backslash{this, "Backslash", "反斜杠  \\ → 、", true};
+);
+
 /// Addon configuration, shown in fcitx5-configtool.
 ///
 /// The language-switch key, the Enter/Space behaviour and every punctuation
@@ -74,27 +96,10 @@ FCITX_CONFIGURATION(WetypeConfig,
     // look like it governed those instead.
     fcitx::Option<bool> chinesePunctuation{
         this, "ChinesePunctuation", "中文标点（总开关）", true};
-    // One checkbox per symbol, so the config page reads as a plain list.
-    // Everything defaults to on; a key switched off stays ASCII.
-    fcitx::Option<bool> symbolComma{this, "SymbolComma", "逗号  , → ，", true};
-    fcitx::Option<bool> symbolPeriod{this, "SymbolPeriod", "句号  . → 。", true};
-    fcitx::Option<bool> symbolSemicolon{this, "SymbolSemicolon", "分号  ; → ；", true};
-    fcitx::Option<bool> symbolApostrophe{
-        this, "SymbolApostrophe", "单引号  ' → ‘’（自动配对）", true};
-    fcitx::Option<bool> symbolQuestion{this, "SymbolQuestion", "问号  ? → ？", true};
-    fcitx::Option<bool> symbolExclam{this, "SymbolExclam", "叹号  ! → ！", true};
-    fcitx::Option<bool> symbolColon{this, "SymbolColon", "冒号  : → ：", true};
-    fcitx::Option<bool> symbolQuote{
-        this, "SymbolQuote", "双引号  \" → “”（自动配对）", true};
-    // One switch for both halves: nobody wants only the left one.
-    fcitx::Option<bool> symbolParen{
-        this, "SymbolParen", "括号  () → （）", true};
-    fcitx::Option<bool> symbolBracket{
-        this, "SymbolBracket", "方括号  [] → 【】", true};
-    fcitx::Option<bool> symbolBrace{this, "SymbolBrace", "花括号  {} → 「」", true};
-    fcitx::Option<bool> symbolAngle{this, "SymbolAngle", "书名号  <> → 《》", true};
-    fcitx::Option<bool> symbolBackslash{
-        this, "SymbolBackslash", "反斜杠  \\ → 、", true};
+    // The per-symbol switches live in their own group box; see
+    // PunctuationConfig.
+    fcitx::Option<PunctuationConfig> punctuation{
+        this, "Punctuation", "符号映射", PunctuationConfig{}};
 );
 
 /// Owns the daemon connection and closes it exactly once.

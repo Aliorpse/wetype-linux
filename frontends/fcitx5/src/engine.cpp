@@ -572,24 +572,25 @@ void Engine::rebuildPunctuation() {
             punctuation_[key] = value;
         }
     };
-    add(config_.symbolComma.value(), ',', "，");
-    add(config_.symbolPeriod.value(), '.', "。");
-    add(config_.symbolSemicolon.value(), ';', "；");
-    add(config_.symbolApostrophe.value(), '\'', "‘");
-    add(config_.symbolQuestion.value(), '?', "？");
-    add(config_.symbolExclam.value(), '!', "！");
-    add(config_.symbolColon.value(), ':', "：");
-    add(config_.symbolQuote.value(), '"', "“");
+    const auto &punct = *config_.punctuation;
+    add(punct.comma.value(), ',', "，");
+    add(punct.period.value(), '.', "。");
+    add(punct.semicolon.value(), ';', "；");
+    add(punct.apostrophe.value(), '\'', "‘");
+    add(punct.question.value(), '?', "？");
+    add(punct.exclam.value(), '!', "！");
+    add(punct.colon.value(), ':', "：");
+    add(punct.quote.value(), '"', "“");
     // Both halves share one switch.
-    add(config_.symbolParen.value(), '(', "（");
-    add(config_.symbolParen.value(), ')', "）");
-    add(config_.symbolBracket.value(), '[', "【");
-    add(config_.symbolBracket.value(), ']', "】");
-    add(config_.symbolBrace.value(), '{', "「");
-    add(config_.symbolBrace.value(), '}', "」");
-    add(config_.symbolAngle.value(), '<', "《");
-    add(config_.symbolAngle.value(), '>', "》");
-    add(config_.symbolBackslash.value(), '\\', "、");
+    add(punct.paren.value(), '(', "（");
+    add(punct.paren.value(), ')', "）");
+    add(punct.bracket.value(), '[', "【");
+    add(punct.bracket.value(), ']', "】");
+    add(punct.brace.value(), '{', "「");
+    add(punct.brace.value(), '}', "」");
+    add(punct.angle.value(), '<', "《");
+    add(punct.angle.value(), '>', "》");
+    add(punct.backslash.value(), '\\', "、");
 }
 
 void Engine::finishComposition(fcitx::InputContext *ic, State *state,
