@@ -33,7 +33,7 @@ fcitx5 -r -d
 单独提交 PR：
 
 ```
-chore(update): Bump WeType engine from <旧版本号> to <新版本号>
+chore(update): bump WeType engine from <旧版本号> to <新版本号>
 ```
 
 新版本的风险在结构体布局，不在导出符号名——换版本后请至少确认 `initialize → create_session → process_input → 候选 → 上屏` 全链路仍然可用。

@@ -1,5 +1,5 @@
 project('wetype-fcitx5', 'cpp',
-  version: '0.1.1+wetype3.0.2.22',
+  version: '0.1.1+wetype3.0.2.29',
   license: 'MIT',
   default_options: ['cpp_std=c++20', 'warning_level=2'])
 
