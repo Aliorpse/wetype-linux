@@ -59,6 +59,17 @@ impl Engine {
             c.arg(&engine_exe);
             c
         };
+        // Wine's unhandled-exception handler starts winedbg, which spawns yet
+        // more processes and can keep a crashed engine host alive until the
+        // daemon's SIGKILL. A crash is already fatal, so terminate instead of
+        // debugging; the daemon logs the exit status either way.
+        let mut overrides = std::env::var("WINEDLLOVERRIDES").unwrap_or_default();
+        if !overrides.is_empty() {
+            overrides.push(';');
+        }
+        overrides.push_str("winedbg.exe=d");
+        cmd.env("WINEDLLOVERRIDES", overrides);
+
         let mut child = cmd
             // Relative dictionary paths (`WETYPE_DICT_RELATIVE`) and the
             // engine's own data lookups are resolved against the working
