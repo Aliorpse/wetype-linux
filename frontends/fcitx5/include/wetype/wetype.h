@@ -146,14 +146,15 @@ uint32_t wetype_protocol_version(void);
 int wetype_ping(struct WetypeHandle *handle, uint32_t protocol_version);
 
 /**
- * Create a session. `app_name` may be empty or NULL. Returns 0 on success.
- *
  * # Safety
- * `handle` live, `app_name` NULL or NUL-terminated, `out_session` writable.
+ * `handle` live, `app_name`/`smart`/`fuzzy` NULL or NUL-terminated,
+ * `out_session` writable.
  */
 int wetype_new_session(struct WetypeHandle *handle,
                        uint32_t ctx_id,
                        const char *app_name,
+                       const char *smart,
+                       const char *fuzzy,
                        uint64_t *out_session);
 
 /**

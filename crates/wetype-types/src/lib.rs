@@ -36,7 +36,10 @@ pub use codec::{MAX_FRAME_LEN, decode_frame, encode_frame, ipc_codec};
 /// 2: `SelectResult` gained `rest` for partial selection. The old fields are
 ///    reserved, so an old daemon talking to a new addon still degrades to
 ///    whole-word selection instead of misparsing.
-pub const PROTOCOL_VERSION: u32 = 2;
+/// 3: `NewSession` gained the smart-input and fuzzy-pinyin option lists. An old
+///    host would ignore them and silently disable both features, so the version
+///    check is deliberately strict.
+pub const PROTOCOL_VERSION: u32 = 3;
 
 #[cfg(test)]
 mod tests {

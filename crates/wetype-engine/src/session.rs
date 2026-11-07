@@ -432,6 +432,41 @@ impl Sessions {
     }
 }
 
+/// InputAugmenter corrections: wire name and `SessionConfig` byte.
+///
+/// The five bytes are independent in the engine. The frontend enables them
+/// individually; `smart input` in the UI is the master switch around them.
+const SMART_INPUT: &[(&str, usize)] = &[
+    ("transpose", 0x08),
+    ("neighbor", 0x09),
+    ("insert", 0x0a),
+    ("skip", 0x0b),
+    ("other", 0x0c),
+];
+
+/// Fuzzy-pinyin groups: wire name and `SessionConfig` byte.
+const FUZZY_PINYIN: &[(&str, usize)] = &[
+    ("nl", 0x0d),
+    ("rl", 0x0e),
+    ("hf", 0x0f),
+    ("gk", 0x10),
+    ("an_ang", 0x11),
+    ("ian_iang", 0x12),
+    ("uan_uang", 0x13),
+    ("c_ch", 0x14),
+    ("s_sh", 0x15),
+    ("z_zh", 0x16),
+    ("hui_fei", 0x17),
+    ("en_eng", 0x18),
+    ("in_ing", 0x19),
+    ("on_ong", 0x1a),
+    ("huang_wang", 0x1b),
+    ("un_ong", 0x1c),
+    ("un_iong", 0x1d),
+    ("an_ai", 0x1e),
+    ("eng_ong", 0x1f),
+];
+
 /// `SessionConfig`, 0x138 bytes. Only the fields that matter are set; see
 /// `RECIPE.md` for why each one is there.
 #[repr(C, align(8))]
@@ -455,12 +490,32 @@ impl SessionConfig {
     /// keystrokes to Tencent's servers; it cannot work here anyway (no
     /// `ilink_uin`, and the embedded Cronet stack reports `IsValid: 0`), so
     /// enabling it would be pure liability. `WETYPE_CLOUD=1` opts in.
-    fn build(app_name: *const u8, app_name_len: usize, cloud: bool) -> Self {
+    fn build(
+        app_name: *const u8,
+        app_name_len: usize,
+        cloud: bool,
+        smart: &[String],
+        fuzzy: &[String],
+    ) -> Self {
         let mut cfg = Self([0u8; 0x138]);
         let b = cfg.0.as_mut_ptr();
         // SAFETY: every offset below is inside the 0x138-byte struct.
         unsafe {
             *b.add(0x01) = 1;
+            // The frontend sends only enabled names; unknown names are ignored
+            // so an older host can talk to a newer frontend.
+            for name in smart {
+                match SMART_INPUT.iter().find(|(known, _)| known == name) {
+                    Some((_, off)) => *b.add(*off) = 1,
+                    None => tracing::warn!(name, "unknown smart-input option"),
+                }
+            }
+            for name in fuzzy {
+                match FUZZY_PINYIN.iter().find(|(known, _)| known == name) {
+                    Some((_, off)) => *b.add(*off) = 1,
+                    None => tracing::warn!(name, "unknown fuzzy-pinyin option"),
+                }
+            }
             *b.add(0x41) = u8::from(cloud);
             std::ptr::write_unaligned(b.add(0x50) as *mut u32, 3); // return_cnt
             std::ptr::write_unaligned(b.add(0x54) as *mut u32, 1); // predict_next_n
@@ -488,14 +543,22 @@ pub static DEFAULT_APP: &[u8] = b"Weixin.exe\0";
 /// `app_name` is the foreground application the engine should believe it is
 /// serving. The engine keeps a bare pointer to this buffer, so the caller parks
 /// the returned allocation in [`Sessions`] until the session is destroyed.
-pub fn create(api: &EngineApi, shared: &Arc<Shared>, app_name: &[u8]) -> (i64, Box<[u8]>) {
+/// `smart` and `fuzzy` are the enabled option names; empty slices disable the
+/// corresponding `SessionConfig` bytes.
+pub fn create(
+    api: &EngineApi,
+    shared: &Arc<Shared>,
+    app_name: &[u8],
+    smart: &[String],
+    fuzzy: &[String],
+) -> (i64, Box<[u8]>) {
     let mut name = app_name.to_vec();
     if !name.ends_with(&[0]) {
         name.push(0);
     }
     let name = name.into_boxed_slice();
     let cloud = std::env::var_os("WETYPE_CLOUD").is_some();
-    let cfg = SessionConfig::build(name.as_ptr(), name.len(), cloud);
+    let cfg = SessionConfig::build(name.as_ptr(), name.len(), cloud, smart, fuzzy);
     // SAFETY: `cfg` is a fully initialised SessionConfig.
     let id = unsafe { (api.create_session)(cfg.0.as_ptr() as *const c_void) };
     if id <= 0 {
@@ -544,7 +607,7 @@ mod tests {
 
     #[test]
     fn session_config_has_the_switch_that_makes_candidates_arrive() {
-        let cfg = SessionConfig::build(DEFAULT_APP.as_ptr(), DEFAULT_APP.len(), false);
+        let cfg = SessionConfig::build(DEFAULT_APP.as_ptr(), DEFAULT_APP.len(), false, &[], &[]);
         assert_eq!(
             cfg.0[0x01], 1,
             "+0x01 must be set or the listener never fires"
@@ -555,7 +618,7 @@ mod tests {
 
     #[test]
     fn session_config_records_the_app_name() {
-        let cfg = SessionConfig::build(DEFAULT_APP.as_ptr(), DEFAULT_APP.len(), false);
+        let cfg = SessionConfig::build(DEFAULT_APP.as_ptr(), DEFAULT_APP.len(), false, &[], &[]);
         let ptr = u64::from_unaligned(&cfg.0[0xC0..]) as *const u8;
         let len = u32::from_unaligned(&cfg.0[0xDC..]);
         assert_eq!(len, 10, "\"Weixin.exe\" is 10 bytes");

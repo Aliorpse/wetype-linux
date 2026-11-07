@@ -52,6 +52,7 @@ FCITX_CONFIG_ENUM_NAME(PreeditMode, "fcitx5 显示", "应用内显示");
 /// A nested Configuration is rendered by fcitx5-configtool as one titled group
 /// box, so the dozen switches do not flatten the addon page.
 FCITX_CONFIGURATION(PunctuationConfig,
+    fcitx::Option<bool> enabled{this, "Enabled", "中文标点（总开关）", true};
     fcitx::Option<bool> comma{this, "Comma", "逗号  , → ，", true};
     fcitx::Option<bool> period{this, "Period", "句号  . → 。", true};
     fcitx::Option<bool> semicolon{this, "Semicolon", "分号  ; → ；", true};
@@ -69,11 +70,57 @@ FCITX_CONFIGURATION(PunctuationConfig,
     fcitx::Option<bool> backslash{this, "Backslash", "反斜杠  \\ → 、", true};
 );
 
+
+/// InputAugmenter corrections, one group box.
+///
+/// The five bytes are independent in the engine; `enabled` is the master switch
+/// exposed in the status area, and the sub-switches let a user keep, say, only
+/// transposition while turning the rest off.
+FCITX_CONFIGURATION(SmartInputConfig,
+    fcitx::Option<bool> enabled{this, "Enabled", "智能纠错（总开关）", true};
+    fcitx::Option<bool> transpose{this, "Transpose", "换位纠错", true};
+    fcitx::Option<bool> neighbor{this, "Neighbor", "邻键纠错", true};
+    fcitx::Option<bool> insert{this, "Insert", "插入纠错", true};
+    fcitx::Option<bool> skip{this, "Skip", "跳字纠错", true};
+    fcitx::Option<bool> other{this, "Other", "其他纠错", true};
+);
+
+/// Fuzzy-pinyin groups, one group box.
+///
+/// Only en/eng and in/ing are on by default. The whole an/ang family
+/// (an/ang, ian/iang, uan/uang) is off: that distinction is clear enough that
+/// fuzzy matching changes too many common words. Every other pair starts off.
+FCITX_CONFIGURATION(FuzzyConfig,
+    fcitx::Option<bool> nl{this, "nl", "n / l（la → 那）", false};
+    fcitx::Option<bool> rl{this, "rl", "r / l（rou → 楼）", false};
+    fcitx::Option<bool> hf{this, "hf", "h / f（hu → 付）", false};
+    fcitx::Option<bool> gk{this, "gk", "g / k（ge → 可）", false};
+    fcitx::Option<bool> an_ang{this, "an_ang", "an / ang（fan → 放）", false};
+    fcitx::Option<bool> ian_iang{
+        this, "ian_iang", "ian / iang（jian → 将）", false};
+    fcitx::Option<bool> uan_uang{
+        this, "uan_uang", "uan / uang（guan → 光）", false};
+    fcitx::Option<bool> c_ch{this, "c_ch", "c / ch（cang → 长）", false};
+    fcitx::Option<bool> s_sh{this, "s_sh", "s / sh（sang → 上）", false};
+    fcitx::Option<bool> z_zh{this, "z_zh", "z / zh（zong → 中）", false};
+    fcitx::Option<bool> hui_fei{this, "hui_fei", "hui / fei（hui → 费）", false};
+    fcitx::Option<bool> en_eng{this, "en_eng", "en / eng（fen → 风）", true};
+    fcitx::Option<bool> in_ing{this, "in_ing", "in / ing（jin → 经）", true};
+    fcitx::Option<bool> on_ong{this, "on_ong", "on / ong", false};
+    fcitx::Option<bool> huang_wang{
+        this, "huang_wang", "huang / wang（huang → 王）", false};
+    fcitx::Option<bool> un_ong{this, "un_ong", "un / ong（gun → 工）", false};
+    fcitx::Option<bool> un_iong{this, "un_iong", "un / iong（jiong → 军）", false};
+    fcitx::Option<bool> an_ai{this, "an_ai", "an / ai（an → 爱）", false};
+    fcitx::Option<bool> eng_ong{this, "eng_ong", "eng / ong（deng → 东）", false};
+);
+
 /// Addon configuration, shown in fcitx5-configtool.
 ///
-/// The language-switch key, the Enter/Space behaviour and every punctuation
-/// mapping are user-visible preferences, so all of them live here rather than
-/// being compiled in; changing any of them needs no rebuild.
+/// The language-switch key, the Enter/Space behaviour, every punctuation
+/// mapping, and the smart-input/fuzzy-pinyin switches are user-visible
+/// preferences, so all of them live here rather than being compiled in;
+/// changing any of them needs no rebuild.
 FCITX_CONFIGURATION(WetypeConfig,
     // One dropdown instead of a key capture widget: the widget insists on a key
     // plus modifiers, so a bare Shift/Ctrl can never be captured there. An enum
@@ -91,15 +138,14 @@ FCITX_CONFIGURATION(WetypeConfig,
         this, "EnterBehavior", "回车键行为", CommitBehavior::Raw};
     fcitx::Option<CommitBehavior> spaceBehavior{
         this, "SpaceBehavior", "空格键行为", CommitBehavior::FirstCandidate};
-    // The master switch for the per-symbol list below. It belongs directly
-    // above that list: sitting between the switch key and Enter/Space made it
-    // look like it governed those instead.
-    fcitx::Option<bool> chinesePunctuation{
-        this, "ChinesePunctuation", "中文标点（总开关）", true};
-    // The per-symbol switches live in their own group box; see
-    // PunctuationConfig.
+    // The master switch lives inside the same group box as the per-symbol
+    // switches it governs.
     fcitx::Option<PunctuationConfig> punctuation{
         this, "Punctuation", "符号映射", PunctuationConfig{}};
+    fcitx::Option<SmartInputConfig> smartInput{
+        this, "SmartInput", "智能纠错", SmartInputConfig{}};
+    fcitx::Option<FuzzyConfig> fuzzy{
+        this, "Fuzzy", "模糊音", FuzzyConfig{}};
 );
 
 /// Owns the daemon connection and closes it exactly once.
@@ -120,8 +166,12 @@ public:
 
     /// Lazily created on the first key, so switching input methods does not
     /// create engine sessions that are never used.
-    bool ensureSession(fcitx::InputContext &ic);
+    bool ensureSession(fcitx::InputContext &ic, const std::string &smart,
+                       const std::string &fuzzy, uint64_t configGeneration);
     uint64_t session() const { return session_; }
+    /// Config revision the current session was created with. A different value
+    /// means the smart/fuzzy options changed and the session must be rebuilt.
+    uint64_t configGeneration() const { return configGeneration_; }
     /// Connection generation the current session was created on. A different
     /// value means the daemon restarted and the session id is stale.
     uint64_t connection() const { return connection_; }
@@ -164,6 +214,7 @@ private:
     HandlePtr handle_;
     uint64_t session_ = 0;
     uint64_t connection_ = 0;
+    uint64_t configGeneration_ = 0;
 };
 
 class StateFactory : public fcitx::InputContextPropertyFactory {
@@ -218,6 +269,12 @@ private:
 
     /// Build the punctuation lookup from the per-symbol checkboxes.
     void rebuildPunctuation();
+    /// Smart/fuzzy names for the next session, in the order the engine host
+    /// maps them to SessionConfig bytes. Empty strings mean all off.
+    std::string smartOptions() const;
+    std::string fuzzyOptions() const;
+    /// Keep the status-area smart-input action in sync with the config.
+    void updateSmartAction();
 
     /// Close the composition on Enter/Space. `preferRaw` commits the literal
     /// pinyin, otherwise the first candidate wins when there is one.
@@ -241,10 +298,17 @@ private:
     HandlePtr handle_;
     StateFactory factory_;
     fcitx::Instance *instance_ = nullptr;
-    /// Toggle in fcitx5's status area / tray menu. Lives as long as the addon
-    /// and must be registered with the UserInterfaceManager to be rendered.
+    /// Status-area toggles: the punctuation master switch and the smart-input
+    /// master switch (fuzzy pinyin deliberately has no quick toggle). They live
+    /// as long as the addon and must be registered with the
+    /// UserInterfaceManager to be rendered.
     fcitx::SimpleAction punctuationAction_;
+    fcitx::SimpleAction smartInputAction_;
     WetypeConfig config_;
+    /// Bumped on every config reload; sessions created under an older revision
+    /// are closed and recreated so smart/fuzzy changes take effect without
+    /// restarting fcitx5.
+    uint64_t configGeneration_ = 0;
     std::map<char, std::string> punctuation_;
     /// Set after the "service missing" popup was shown, so a burst of keys does
     /// not repeat it; cleared when a session can be created again.

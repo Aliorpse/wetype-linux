@@ -49,6 +49,11 @@ message NewSession {
   // Foreground application name, e.g. "Weixin.exe". The engine uses this for
   // its own scene decisions; empty is acceptable.
   string app_name = 2;
+  // InputAugmenter corrections to enable: transpose, neighbor, insert, skip,
+  // other. Empty disables all of them.
+  repeated string smart = 3;
+  // Fuzzy-pinyin groups to enable, e.g. "an_ang". Empty disables all of them.
+  repeated string fuzzy = 4;
 }
 
 message CloseSession {

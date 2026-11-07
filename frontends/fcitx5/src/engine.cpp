@@ -76,13 +76,15 @@ State::~State() {
     }
 }
 
-bool State::ensureSession(fcitx::InputContext &ic) {
+bool State::ensureSession(fcitx::InputContext &ic, const std::string &smart,
+                          const std::string &fuzzy, uint64_t configGeneration) {
     const uint64_t connection = wetype_generation(handle_.get());
-    if (session_ != 0 && connection_ != connection) {
-        // The daemon restarted, and every session died with it. Session ids are
-        // not reused across restarts, so the old one must not be kept even if
-        // the number happens to exist again.
-        session_ = 0;
+    if (session_ != 0 &&
+        (connection_ != connection || configGeneration_ != configGeneration)) {
+        // Either the daemon restarted or the smart/fuzzy options changed. The
+        // old session cannot pick up new SessionConfig bytes, so close it and
+        // build a fresh one below.
+        dropSession();
     }
     if (session_ != 0) {
         return true;
@@ -96,11 +98,13 @@ bool State::ensureSession(fcitx::InputContext &ic) {
         app.resize(kMaxAppName);
     }
     uint64_t session = 0;
-    if (wetype_new_session(handle_.get(), 0, app.c_str(), &session) != 0) {
+    if (wetype_new_session(handle_.get(), 0, app.c_str(), smart.c_str(),
+                           fuzzy.c_str(), &session) != 0) {
         return false;
     }
     session_ = session;
     connection_ = connection;
+    configGeneration_ = configGeneration;
     return true;
 }
 
@@ -136,7 +140,22 @@ Engine::Engine(fcitx::AddonManager *manager)
     // know - which is exactly how `raw` went missing once.
     reloadConfig();
     updatePunctuationLabel();
+    updateSmartAction();
     if (instance_) {
+        smartInputAction_.registerAction("wetype-smart-input",
+                                         &instance_->userInterfaceManager());
+        smartInputAction_.connect<fcitx::SimpleAction::Activated>(
+            [this](fcitx::InputContext *ic) {
+                auto &enabled = config_.smartInput.mutableValue()->enabled;
+                enabled.setValue(!enabled.value());
+                ++configGeneration_;
+                updateSmartAction();
+                save();
+                if (ic) {
+                    ic->updateUserInterface(
+                        fcitx::UserInterfaceComponent::StatusArea);
+                }
+            });
         punctuationAction_.registerAction("wetype-punctuation",
                                           &instance_->userInterfaceManager());
         // The status-area entry is the second switch for the same option: users
@@ -144,8 +163,9 @@ Engine::Engine(fcitx::AddonManager *manager)
         // page, and this is where every other IME puts it.
         punctuationAction_.connect<fcitx::SimpleAction::Activated>(
             [this](fcitx::InputContext *ic) {
-                config_.chinesePunctuation.setValue(
-                    !config_.chinesePunctuation.value());
+                auto &enabled =
+                    config_.punctuation.mutableValue()->enabled;
+                enabled.setValue(!enabled.value());
                 rebuildPunctuation();
                 updatePunctuationLabel();
                 // Persist immediately, otherwise the choice is lost the next
@@ -215,6 +235,8 @@ void Engine::setConfig(const fcitx::RawConfig &raw) {
 void Engine::reloadConfig() {
     fcitx::readAsIni(config_, "conf/wetype.conf");
     rebuildPunctuation();
+    ++configGeneration_;
+    updateSmartAction();
     updatePunctuationLabel();
 }
 
@@ -237,7 +259,8 @@ void Engine::keyEvent(const fcitx::InputMethodEntry &, fcitx::KeyEvent &event) {
     // key: otherwise the stale composition would be sent to a session that no
     // longer exists and the error would only surface one call later.
     if (state->session() != 0 &&
-        state->connection() != wetype_generation(handle_.get())) {
+        (state->connection() != wetype_generation(handle_.get()) ||
+         state->configGeneration() != configGeneration_)) {
         state->dropSession();
         clearUI(ic, state);
     }
@@ -334,7 +357,8 @@ void Engine::keyEvent(const fcitx::InputMethodEntry &, fcitx::KeyEvent &event) {
 
     // Letters start (or extend) a composition.
     if (letter) {
-        if (!state->ensureSession(*ic)) {
+        if (!state->ensureSession(*ic, smartOptions(), fuzzyOptions(),
+                                  configGeneration_)) {
             warnServiceMissing(ic);
             return;
         }
@@ -373,7 +397,8 @@ void Engine::keyEvent(const fcitx::InputMethodEntry &, fcitx::KeyEvent &event) {
     // Chinese punctuation: commit the current first candidate, then write the
     // symbol straight into the application. This is what WeType itself does,
     // and it behaves the same in every client (no preedit rendering involved).
-    if (!state->english_ && config_.chinesePunctuation.value() && sym > 0x20 &&
+    if (!state->english_ && config_.punctuation->enabled.value() &&
+        sym > 0x20 &&
         sym < 0x7f) {
         if (const auto it = punctuation_.find(static_cast<char>(sym));
             it != punctuation_.end()) {
@@ -566,6 +591,71 @@ bool Engine::selectCandidate(fcitx::InputContext *ic, State *state,
     return true;
 }
 
+std::string Engine::smartOptions() const {
+    const auto &c = *config_.smartInput;
+    if (!c.enabled.value()) {
+        return {};
+    }
+    std::string list;
+    const auto add = [&list](bool on, const char *name) {
+        if (!on) {
+            return;
+        }
+        if (!list.empty()) {
+            list += ',';
+        }
+        list += name;
+    };
+    add(c.transpose.value(), "transpose");
+    add(c.neighbor.value(), "neighbor");
+    add(c.insert.value(), "insert");
+    add(c.skip.value(), "skip");
+    add(c.other.value(), "other");
+    return list;
+}
+
+std::string Engine::fuzzyOptions() const {
+    const auto &c = *config_.fuzzy;
+    std::string list;
+    const auto add = [&list](bool on, const char *name) {
+        if (!on) {
+            return;
+        }
+        if (!list.empty()) {
+            list += ',';
+        }
+        list += name;
+    };
+    add(c.nl.value(), "nl");
+    add(c.rl.value(), "rl");
+    add(c.hf.value(), "hf");
+    add(c.gk.value(), "gk");
+    add(c.an_ang.value(), "an_ang");
+    add(c.ian_iang.value(), "ian_iang");
+    add(c.uan_uang.value(), "uan_uang");
+    add(c.c_ch.value(), "c_ch");
+    add(c.s_sh.value(), "s_sh");
+    add(c.z_zh.value(), "z_zh");
+    add(c.hui_fei.value(), "hui_fei");
+    add(c.en_eng.value(), "en_eng");
+    add(c.in_ing.value(), "in_ing");
+    add(c.on_ong.value(), "on_ong");
+    add(c.huang_wang.value(), "huang_wang");
+    add(c.un_ong.value(), "un_ong");
+    add(c.un_iong.value(), "un_iong");
+    add(c.an_ai.value(), "an_ai");
+    add(c.eng_ong.value(), "eng_ong");
+    return list;
+}
+
+void Engine::updateSmartAction() {
+    const bool enabled = config_.smartInput->enabled.value();
+    const std::string text = enabled ? "智能纠错：开" : "智能纠错：关";
+    smartInputAction_.setShortText(text);
+    smartInputAction_.setLongText(text);
+    smartInputAction_.setChecked(enabled);
+}
+
 void Engine::rebuildPunctuation() {
     punctuation_.clear();
     const auto add = [this](bool enabled, char key, const char *value) {
@@ -617,7 +707,7 @@ void Engine::finishComposition(fcitx::InputContext *ic, State *state,
 void Engine::updatePunctuationLabel() {
     // Full-width colon on purpose: an ASCII ':' inside a menu label is treated
     // as a "label: shortcut" separator and everything after it is dropped.
-    const std::string text = config_.chinesePunctuation.value()
+    const std::string text = config_.punctuation->enabled.value()
                                  ? "标点映射：中文"
                                  : "标点映射：英文";
     // shortText is the panel button caption, longText the menu item caption;
@@ -626,7 +716,8 @@ void Engine::updatePunctuationLabel() {
     punctuationAction_.setLongText(text);
     // Also a real checkbox in the menu: this is the switch users flip most
     // often, and the config page alone means opening configtool for it.
-    punctuationAction_.setChecked(config_.chinesePunctuation.value());
+    punctuationAction_.setChecked(
+        config_.punctuation->enabled.value());
 }
 
 void Engine::activate(const fcitx::InputMethodEntry &,
@@ -645,6 +736,8 @@ void Engine::activate(const fcitx::InputMethodEntry &,
     // group on focus loss by itself.
     ic->statusArea().addAction(fcitx::StatusGroup::InputMethod,
                                &punctuationAction_);
+    ic->statusArea().addAction(fcitx::StatusGroup::InputMethod,
+                               &smartInputAction_);
 }
 
 void Engine::selectByIndex(fcitx::InputContext *ic, uint32_t index) {

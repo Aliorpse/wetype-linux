@@ -338,13 +338,31 @@ pub unsafe extern "C" fn wetype_ping(handle: *mut WetypeHandle, protocol_version
 
 /// Create a session. `app_name` may be empty or NULL. Returns 0 on success.
 ///
+/// Split a comma-separated option list. NULL or an empty string means "none".
+unsafe fn csv_list(value: *const c_char) -> Vec<String> {
+    if value.is_null() {
+        return Vec::new();
+    }
+    // SAFETY: caller guarantees NUL termination.
+    unsafe { CStr::from_ptr(value) }
+        .to_string_lossy()
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
 /// # Safety
-/// `handle` live, `app_name` NULL or NUL-terminated, `out_session` writable.
+/// `handle` live, `app_name`/`smart`/`fuzzy` NULL or NUL-terminated,
+/// `out_session` writable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn wetype_new_session(
     handle: *mut WetypeHandle,
     ctx_id: u32,
     app_name: *const c_char,
+    smart: *const c_char,
+    fuzzy: *const c_char,
     out_session: *mut u64,
 ) -> c_int {
     if out_session.is_null() {
@@ -359,7 +377,9 @@ pub unsafe extern "C" fn wetype_new_session(
             .to_string_lossy()
             .into_owned()
     };
-    let session = handle_call!(handle, |h| h.client.new_session(ctx_id, &app));
+    // SAFETY: both pointers are either NULL or NUL-terminated per the contract.
+    let (smart, fuzzy) = unsafe { (csv_list(smart), csv_list(fuzzy)) };
+    let session = handle_call!(handle, |h| h.client.new_session(ctx_id, &app, &smart, &fuzzy));
     // SAFETY: checked non-null above.
     unsafe { *out_session = session };
     0

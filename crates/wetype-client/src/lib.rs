@@ -362,10 +362,18 @@ impl Client {
         }
     }
 
-    pub fn new_session(&self, ctx_id: u32, app_name: &str) -> Result<u64> {
+    pub fn new_session(
+        &self,
+        ctx_id: u32,
+        app_name: &str,
+        smart: &[String],
+        fuzzy: &[String],
+    ) -> Result<u64> {
         let resp = self.call(ipc::request::Kind::NewSession(ipc::NewSession {
             ctx_id,
             app_name: app_name.to_string(),
+            smart: smart.to_vec(),
+            fuzzy: fuzzy.to_vec(),
         }))?;
         match resp.kind {
             Some(ipc::response::Kind::Created(c)) => Ok(c.session),

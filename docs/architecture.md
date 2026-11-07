@@ -99,6 +99,44 @@ preedit 直接用引擎给的 `ni'hao` 形式，不自己拼拼音。
 - `SessionConfig+0x41` 默认 0，`WETYPE_CLOUD=1` 才开启；
 - 接收侧已支持：类型 6 与类型 0 同一迭代器，`marker==0xFFFD && origin==11000` 标记云候选。
 
+## 智能拼写与模糊音
+
+这些是 `SessionConfig` 的本地字节，不依赖网络，已验证可被 wetype-linux 直接复刻：
+
+| 字节 | 含义 |
+|---|---|
+| `+0x08..+0x0C` | InputAugmenter：换位、邻键、插入、跳字纠错 |
+| `+0x0D` | n/l |
+| `+0x0E` | r/l |
+| `+0x0F` | h/f |
+| `+0x10` | g/k |
+| `+0x11` | an/ang |
+| `+0x12` | ian/iang |
+| `+0x13` | uan/uang |
+| `+0x14` | c/ch |
+| `+0x15` | s/sh |
+| `+0x16` | z/zh |
+| `+0x17` | hui/fei |
+| `+0x18` | en/eng |
+| `+0x19` | in/ing |
+| `+0x1A` | on/ong |
+| `+0x1B` | huang/wang |
+| `+0x1C` | un/ong |
+| `+0x1D` | un/iong |
+| `+0x1E` | an/ai |
+| `+0x1F` | eng/ong |
+
+配置页里是两个分组框：
+
+- **智能纠错**：`启用智能纠错` 总开关 + 换位/邻键/插入/跳字/其他五个子开关，
+  默认全开；状态栏/托盘的「智能纠错」菜单项是同一个总开关的快捷入口。
+- **模糊音**：19 组独立开关，默认只开 `en/eng` 与 `in/ing`。
+
+这些选项随 `NewSession` 发给 daemon 和 engine host，只在**创建 session** 时写入
+`SessionConfig`；修改配置后，下一次按键会关闭旧 session 并按新配置重建。命令行
+调试用 `--smart LIST`、`--no-smart`、`--fuzzy LIST` 覆盖（默认与配置页一致：
+smart 全开、fuzzy 为 `en_eng,in_ing`）。
+
 ## 构建
 
 - `scripts/build.sh`：daemon/CLI、`bin/engine/wetype-engine.exe`、`libwetype.so`；
@@ -118,7 +156,8 @@ export WETYPE_DATA_DIR=$PWD/.run/data
 - 产物在 `target/x86_64-unknown-linux-gnu/release/`（构建带 `--target`）；
 - `--socket PATH` 连已有 daemon；不带时 CLI 自己 spawn 宿主；
 - `--app NAME` 指定 session 的应用名，用于对比引擎的按应用行为（空即 `Weixin.exe`）；
-- `--pick N` 选第 N 个候选，`--no-close`、`--linger N`、`--steal ID` 用于调试会话归属。
+- `--pick N` 选第 N 个候选，`--no-close`、`--linger N`、`--steal ID` 用于调试会话归属；
+- `--smart LIST` / `--no-smart`、`--fuzzy LIST` 覆盖本次会话的智能纠错与模糊音。
 
 ## 运行时变量
 

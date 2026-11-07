@@ -134,6 +134,15 @@ impl Conn {
     }
 }
 
+fn split_list(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
     let mut engine = None;
@@ -150,6 +159,10 @@ fn main() -> Result<()> {
     let mut pick_override: Option<usize> = None;
     let mut pick2_override: Option<usize> = None;
     let mut pick3_override: Option<usize> = None;
+    // The addon's default is smart input on (all five augmenters) and fuzzy
+    // off; keep the CLI on the same defaults so a manual run is representative.
+    let mut smart = split_list("transpose,neighbor,insert,skip,other");
+    let mut fuzzy = split_list("en_eng,in_ing");
     while let Some(a) = args.next() {
         match a.as_str() {
             "--engine" => engine = args.next(),
@@ -164,6 +177,9 @@ fn main() -> Result<()> {
             "--pick2" => pick2_override = args.next().and_then(|v| v.parse().ok()),
             "--pick3" => pick3_override = args.next().and_then(|v| v.parse().ok()),
             "--app" => app = args.next().unwrap_or_default(),
+            "--smart" => smart = split_list(&args.next().unwrap_or_default()),
+            "--no-smart" => smart.clear(),
+            "--fuzzy" => fuzzy = split_list(&args.next().unwrap_or_default()),
             other => bail!("unknown argument {other}"),
         }
     }
@@ -216,6 +232,8 @@ fn main() -> Result<()> {
     let created = conn.call(ipc::request::Kind::NewSession(ipc::NewSession {
         ctx_id: 1,
         app_name: app,
+        smart,
+        fuzzy,
     }))?;
     let session = match created.kind {
         Some(ipc::response::Kind::Created(c)) => c.session,

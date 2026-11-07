@@ -270,7 +270,8 @@ fn dispatch(
             } else {
                 n.app_name.as_bytes()
             };
-            let (id, name) = session::create(api, &shared, app);
+            let (id, name) =
+                session::create(api, &shared, app, &n.smart, &n.fuzzy);
             if id <= 0 {
                 return Ok(fail(seq, format!("create_session returned {id}")));
             }
