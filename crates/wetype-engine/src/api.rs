@@ -66,6 +66,11 @@ pub struct EngineApi {
     /// uninitialised, which happens to be zero today and is therefore UB.
     pub process_input: unsafe extern "C" fn(u64, *const c_char, u32, *const c_void, u32) -> u8,
     /// 12 arguments: session, text, id, then four spare `{ptr, u32}` pairs.
+    ///
+    /// This one export handles both whole-word and partial selection. For a
+    /// partial candidate the engine keeps the selected text in its pending
+    /// input and returns candidates for the uncovered suffix; no reset is
+    /// needed. The spare pairs stay NULL for local candidates.
     pub select_candidate: unsafe extern "C" fn(
         i64,
         *const c_char,

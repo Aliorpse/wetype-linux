@@ -148,6 +148,8 @@ fn main() -> Result<()> {
     // Which candidate to select. Without it the first non-empty row is picked,
     // which is a whole-word candidate; partial selection needs an explicit one.
     let mut pick_override: Option<usize> = None;
+    let mut pick2_override: Option<usize> = None;
+    let mut pick3_override: Option<usize> = None;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--engine" => engine = args.next(),
@@ -159,6 +161,8 @@ fn main() -> Result<()> {
             "--linger" => linger = args.next().and_then(|v| v.parse().ok()).unwrap_or(0),
             "--reset" => do_reset = true,
             "--pick" => pick_override = args.next().and_then(|v| v.parse().ok()),
+            "--pick2" => pick2_override = args.next().and_then(|v| v.parse().ok()),
+            "--pick3" => pick3_override = args.next().and_then(|v| v.parse().ok()),
             "--app" => app = args.next().unwrap_or_default(),
             other => bail!("unknown argument {other}"),
         }
@@ -314,6 +318,49 @@ fn main() -> Result<()> {
                     String::from_utf8_lossy(&rest.raw),
                     rest.items.len()
                 );
+                if let Some(pick2) = pick2_override.filter(|i| *i < rest.items.len()) {
+                    let second = conn.call(ipc::request::Kind::Select(ipc::Select {
+                        session,
+                        generation: rest.generation,
+                        index: pick2 as u32,
+                    }))?;
+                    match second.kind {
+                        Some(ipc::response::Kind::SelectResult(r2)) => {
+                            println!(
+                                "second committed {:?} (finished {})",
+                                String::from_utf8_lossy(&r2.commit),
+                                r2.finished
+                            );
+                            if let Some(rest2) = r2.rest {
+                                println!(
+                                    "  still composing: preedit {:?} raw {:?}, {} candidates",
+                                    String::from_utf8_lossy(&rest2.preedit),
+                                    String::from_utf8_lossy(&rest2.raw),
+                                    rest2.items.len()
+                                );
+                                if let Some(pick3) =
+                                    pick3_override.filter(|i| *i < rest2.items.len())
+                                {
+                                    let third =
+                                        conn.call(ipc::request::Kind::Select(ipc::Select {
+                                            session,
+                                            generation: rest2.generation,
+                                            index: pick3 as u32,
+                                        }))?;
+                                    match third.kind {
+                                        Some(ipc::response::Kind::SelectResult(r3)) => println!(
+                                            "third committed {:?} (finished {})",
+                                            String::from_utf8_lossy(&r3.commit),
+                                            r3.finished
+                                        ),
+                                        _ => println!("third select failed: {}", third.error),
+                                    }
+                                }
+                            }
+                        }
+                        _ => println!("second select failed: {}", second.error),
+                    }
+                }
             }
         }
         _ => bail!("select failed: {}", picked.error),

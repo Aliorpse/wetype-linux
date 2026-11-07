@@ -151,6 +151,24 @@ fn write_response(out: &mut impl Write, resp: &ipc::Response) -> Result<()> {
     Ok(())
 }
 
+/// Remove the part of a whole-phrase commit that a partial selection already
+/// handed to the application. The engine's final event contains the entire
+/// phrase (selected prefix + new suffix), while the client has the prefix.
+///
+/// Returns false when a non-empty prefix did not match. The caller decides
+/// whether that is expected: a partial commit is the new segment and normally
+/// does not start with the prefix, while a final whole-phrase commit should.
+fn subtract_committed_prefix(text: &mut Vec<u8>, prefix: &[u8]) -> bool {
+    if prefix.is_empty() {
+        return true;
+    }
+    if !text.starts_with(prefix) {
+        return false;
+    }
+    text.drain(..prefix.len());
+    true
+}
+
 fn ok(seq: u64, kind: ipc::response::Kind) -> ipc::Response {
     ipc::Response {
         seq,
@@ -316,7 +334,27 @@ fn dispatch(
             }
             let snap = sessions.snapshot(id).unwrap_or_default();
             // Commits are drained, not cloned: each one is delivered once.
-            let commit = sessions.take_commits(id).concat();
+            let mut commit = sessions.take_commits(id).concat();
+            // If an auto-commit ends a composition that had a partially
+            // committed prefix, the engine's text is the whole phrase; only
+            // the new tail belongs to the application.
+            let prefix = sessions.committed_prefix(id);
+            let had_commit = !commit.is_empty();
+            let prefix_matched = subtract_committed_prefix(&mut commit, &prefix);
+            if snap.selected.is_empty() && snap.raw.is_empty() {
+                if had_commit && !prefix.is_empty() && !prefix_matched {
+                    // The final text did not start with what was already
+                    // committed. The bytes are left untouched, but this is the
+                    // case that would duplicate the prefix; keep it text-free.
+                    tracing::debug!(
+                        session = id,
+                        prefix_len = prefix.len(),
+                        commit_len = commit.len(),
+                        "final commit does not start with the committed prefix"
+                    );
+                }
+                sessions.clear_committed_prefix(id);
+            }
             let mut wire = session::to_wire(id, &snap, MAX_CANDIDATES);
             wire.commit = commit;
             ok(seq, ipc::response::Kind::Candidates(wire))
@@ -354,9 +392,16 @@ fn dispatch(
             let partial = covered > 0
                 && covered < snap.raw.len()
                 && rest_keys.iter().all(|b| (0x21..=0x7e).contains(b));
+            // One export handles both cases. For a partial candidate the
+            // engine keeps the selected word as a type-0 pending node and
+            // returns candidates for the uncovered suffix; for a whole-word
+            // candidate it emits the whole phrase through event type 2. No
+            // reset is needed (and resetting is what used to discard the
+            // engine's chance to learn the partial word).
+            //
             // SAFETY: text and id are owned blobs copied out of the engine's
-            // candidate struct; the spare {ptr,u32} pairs stay NULL for a local
-            // candidate (cloud payloads would go there).
+            // candidate struct; the spare {ptr,u32} pairs stay NULL for a
+            // local candidate (cloud payloads would go there).
             unsafe {
                 (api.select_candidate)(
                     id,
@@ -373,25 +418,64 @@ fn dispatch(
                     std::ptr::null(),
                 );
             }
-            // The engine does NOT consume its composition when suffix_len is 0,
-            // so the session has to be reset or the next keystroke appends to
-            // the previous pinyin. See RECIPE.md. A partial selection replays
-            // the uncovered keys into the reset session below.
-            // SAFETY: id is a live session.
-            unsafe { (api.reset_session)(id) };
-            // Prefer what the engine actually emitted (event type 2); fall back
-            // to the candidate text only if it emitted nothing, which happens
-            // when the engine has not been told about the selection yet.
             let emitted = sessions.take_commits(id).concat();
+            let from_engine = !emitted.is_empty();
             let mut commit = if emitted.is_empty() {
                 cand.text.clone()
             } else {
                 emitted
             };
+            // The engine's final commit is the whole phrase, including text
+            // this host already handed to the application during earlier
+            // partial selections. Subtract that prefix so the client does not
+            // commit it twice.
+            //
+            // A partial commit is normally just the new segment, so this call
+            // does not match and changes nothing; it is unconditional because
+            // the engine may also send a whole-phrase commit here. A match on
+            // a partial means the candidate repeated the prefix, which would
+            // make the subtraction cut real text; log it instead of relying on
+            // that invariant silently.
+            let prefix_overlap = !snap.committed_prefix.is_empty()
+                && commit.starts_with(&snap.committed_prefix);
+            let prefix_matched =
+                subtract_committed_prefix(&mut commit, &snap.committed_prefix);
+            if partial && prefix_overlap {
+                tracing::debug!(
+                    session = id,
+                    prefix_len = snap.committed_prefix.len(),
+                    commit_len = commit.len(),
+                    "partial commit starts with the committed prefix"
+                );
+            }
             // Length only: this process's stderr is the journal, and the
-            // committed text is whatever the user typed - often a password or a
-            // private message. The text stays out of the log at every level.
+            // committed text is whatever the user typed - often a password or
+            // a private message. The text stays out of the log at every level.
             if !partial {
+                if from_engine
+                    && !snap.committed_prefix.is_empty()
+                    && !prefix_matched
+                {
+                    // A whole-phrase commit from the engine should contain the
+                    // prefix earlier partial selections already sent; if it
+                    // does not, the client may see that prefix twice. Keep the
+                    // text out of the log.
+                    tracing::debug!(
+                        session = id,
+                        prefix_len = snap.committed_prefix.len(),
+                        commit_len = commit.len(),
+                        "whole-phrase commit does not start with the committed prefix"
+                    );
+                }
+                // A normal selection must clear the engine's composition. If
+                // it did not (an unknown/pseudo candidate), reset so the next
+                // keystroke cannot append to stale pinyin.
+                let after = sessions.snapshot(id).unwrap_or_default();
+                if !after.selected.is_empty() || !after.raw.is_empty() {
+                    // SAFETY: id is a live session.
+                    unsafe { (api.reset_session)(id) };
+                }
+                sessions.clear_committed_prefix(id);
                 tracing::debug!(
                     session = id,
                     index = s.index,
@@ -407,34 +491,27 @@ fn dispatch(
                     }),
                 ));
             }
-
-            // Rebuild the composition from the keys the user did not commit.
-            // The engine never learns about the committed prefix; the frontend
-            // gets an ordinary candidate list for the remainder and keeps going.
-            for &key in rest_keys {
-                let one = [key];
-                // SAFETY: one byte in 0x21..=0x7e, checked above; the engine
-                // copies it during the call and does not retain the pointer.
-                unsafe {
-                    (api.process_input)(
-                        id as u64,
-                        one.as_ptr() as *const std::ffi::c_char,
-                        1,
-                        std::ptr::null(),
-                        0,
-                    );
-                }
-            }
-            // Anything the replay emitted has to follow the selected word.
-            commit.extend_from_slice(&sessions.take_commits(id).concat());
-
+            // The partial word is now part of the application. Remember it so
+            // a later final commit can be reduced to its new suffix. The
+            // engine keeps the same prefix in its own pending input and will
+            // write both it and the completed phrase to the user dictionary.
+            sessions.append_committed_prefix(id, &commit);
             let after = sessions.snapshot(id).unwrap_or_default();
+            if after.raw != rest_keys {
+                tracing::warn!(
+                    session = id,
+                    raw = %String::from_utf8_lossy(&after.raw),
+                    expected = %String::from_utf8_lossy(rest_keys),
+                    "partial selection left an unexpected suffix"
+                );
+            }
             let rest = session::to_wire(id, &after, MAX_CANDIDATES);
             tracing::debug!(
                 session = id,
                 index = s.index,
                 len = commit.len(),
-                replayed = rest_keys.len(),
+                suffix_len = rest_keys.len(),
+                candidates = after.items.len(),
                 "partially selected"
             );
             ok(
@@ -454,6 +531,7 @@ fn dispatch(
             }
             // SAFETY: id is a live session.
             unsafe { (api.reset_session)(id) };
+            sessions.clear_committed_prefix(id);
             ok(seq, ipc::response::Kind::Ack(ipc::Ack {}))
         }
 
@@ -481,7 +559,24 @@ fn dispatch(
             // state: replying with a bare Ack would leave the client showing a
             // stale preedit.
             let snap = sessions.snapshot(id).unwrap_or_default();
-            let commit = sessions.take_commits(id).concat();
+            let mut commit = sessions.take_commits(id).concat();
+            let prefix = sessions.committed_prefix(id);
+            let had_commit = !commit.is_empty();
+            let prefix_matched = subtract_committed_prefix(&mut commit, &prefix);
+            if snap.selected.is_empty() && snap.raw.is_empty() {
+                if had_commit && !prefix.is_empty() && !prefix_matched {
+                    // The final text did not start with what was already
+                    // committed. The bytes are left untouched, but this is the
+                    // case that would duplicate the prefix; keep it text-free.
+                    tracing::debug!(
+                        session = id,
+                        prefix_len = prefix.len(),
+                        commit_len = commit.len(),
+                        "final commit does not start with the committed prefix"
+                    );
+                }
+                sessions.clear_committed_prefix(id);
+            }
             let mut wire = session::to_wire(id, &snap, MAX_CANDIDATES);
             wire.commit = commit;
             if !deleted {
@@ -490,4 +585,34 @@ fn dispatch(
             ok(seq, ipc::response::Kind::Candidates(wire))
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::subtract_committed_prefix;
+
+    #[test]
+    fn final_commit_is_reduced_to_the_new_suffix() {
+        let mut whole = "中国人敏".as_bytes().to_vec();
+        assert!(subtract_committed_prefix(&mut whole, "中国人".as_bytes()));
+        assert_eq!(whole, "敏".as_bytes());
+    }
+
+    #[test]
+    fn a_partial_segment_does_not_repeat_the_prefix() {
+        let mut partial = "世界".as_bytes().to_vec();
+        assert!(!subtract_committed_prefix(&mut partial, "你好".as_bytes()));
+        assert_eq!(partial, "世界".as_bytes());
+    }
+
+    #[test]
+    fn only_a_real_prefix_is_removed() {
+        let mut whole = "敏".as_bytes().to_vec();
+        assert!(!subtract_committed_prefix(&mut whole, "中国人".as_bytes()));
+        assert_eq!(whole, "敏".as_bytes());
+
+        let mut no_prefix = "中国人敏".as_bytes().to_vec();
+        assert!(subtract_committed_prefix(&mut no_prefix, b""));
+        assert_eq!(no_prefix, "中国人敏".as_bytes());
+    }
 }

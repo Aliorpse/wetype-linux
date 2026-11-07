@@ -163,17 +163,19 @@ message Candidate {
 // belongs on screen right now is in `commit`, decided by the engine host.
 //
 // A candidate whose `cover` is shorter than `raw` commits only that prefix.
-// The engine host then resets the session and replays the uncovered keys, so
-// the composition that is left is a normal one and arrives in `rest` - the
-// frontend never has to rebuild it from pinyin itself.
+// The engine keeps it as a type-0 pending node and returns candidates for the
+// uncovered suffix in `rest`; `commit` is the prefix the frontend should send
+// now. The engine host tracks that prefix, so when the composition finally
+// ends the whole-phrase commit is reduced to the new suffix. The engine sees
+// the partial word and the completed phrase, and learns both.
 message SelectResult {
   // Text to hand to the application now. May be empty.
   bytes  commit   = 1;
   reserved 2, 3;
-  // True when the composition ended (session was reset); `rest` is unset then.
+  // True when the composition ended; `rest` is unset then.
   bool   finished = 4;
   // The composition that is still open after a partial commit. Set exactly
-  // when `finished` is false.
+  // when `finished` is false. It contains only the uncommitted suffix.
   Candidates rest = 5;
 }
 

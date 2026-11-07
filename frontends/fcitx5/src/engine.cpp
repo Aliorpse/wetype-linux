@@ -554,10 +554,11 @@ bool Engine::selectCandidate(fcitx::InputContext *ic, State *state,
         // Whole-word selection: the composition ends here.
         clearUI(ic, state);
     } else {
-        // Partial selection: `commit` went into the application, and the rest
-        // of the pinyin is a normal composition again. Only that remainder is
-        // shown - the committed text belongs to the application now. The engine
-        // host rebuilt the session, so this snapshot is all we need.
+        // Partial selection: `commit` went into the application, and the
+        // engine kept the selected word as its pending prefix. The host has
+        // already stripped that prefix from this snapshot, so `rest` is just
+        // the remaining suffix. Finishing it lets the engine learn both the
+        // partial word and the completed phrase.
         adoptCandidates(state, result.rest);
         updateUI(ic, state, result.rest);
     }

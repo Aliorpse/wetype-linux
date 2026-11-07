@@ -36,13 +36,22 @@ pub struct Snapshot {
     /// back by `Select` so a stale index cannot pick the wrong word.
     pub generation: u64,
     pub items: Vec<Candidate>,
+    /// Text already selected (pending node type 0). It has been handed to the
+    /// application by a partial select, so it is deliberately not part of
+    /// `preedit` or `raw`.
+    pub selected: Vec<u8>,
     pub preedit: Vec<u8>,
-    /// Composition without display separators; what Enter commits.
+    /// Composition without display separators; what Enter commits. This is the
+    /// unselected suffix only: `cover` on each candidate is relative to it.
     pub raw: Vec<u8>,
     pub cursor: u32,
     /// Text the engine asked us to commit (event type 2). Drained on every
     /// reply so each piece is delivered exactly once.
     pub commits: Vec<Vec<u8>>,
+    /// Prefix already committed to the application by earlier partial
+    /// selections in this composition. The engine's final commit contains the
+    /// whole phrase, so the host subtracts this before sending it on.
+    pub committed_prefix: Vec<u8>,
 }
 
 /// Per-session state shared with the C callback.
@@ -163,10 +172,16 @@ unsafe fn drain_iterator(iterator: *mut c_void, out: &mut Vec<Candidate>) {
 /// 6 separator, 7 cursor marker. Corrections keep the user's own byte at +24 -
 /// the engine's synthetic replacement is deliberately not shown.
 ///
+/// Returns `(selected, display, raw, cursor)`. Type 0 is returned separately:
+/// it is already committed to the application and must not be shown as editable
+/// preedit. `display`/`raw` contain only the unselected suffix, which is also
+/// the coordinate space of a candidate's `cover`.
+///
 /// # Safety
 /// `head` must be a pending-input list owned by the engine for the duration of
 /// the callback.
-unsafe fn parse_pending(head: *mut c_void) -> (Vec<u8>, Vec<u8>, u32) {
+unsafe fn parse_pending(head: *mut c_void) -> (Vec<u8>, Vec<u8>, Vec<u8>, u32) {
+    let mut selected: Vec<u8> = Vec::new();
     let mut display: Vec<u8> = Vec::new();
     let mut raw: Vec<u8> = Vec::new();
     let mut cursor: Option<u32> = None;
@@ -179,7 +194,17 @@ unsafe fn parse_pending(head: *mut c_void) -> (Vec<u8>, Vec<u8>, u32) {
         unsafe {
             let ty = std::ptr::read_unaligned(node as *const u32);
             match ty {
-                0 | 1 => {
+                0 => {
+                    // Already selected and committed to the application; it
+                    // is not part of the editable preedit anymore.
+                    let len = std::ptr::read_unaligned(node.add(24) as *const u32);
+                    let data = std::ptr::read_unaligned(node.add(32) as *const *const u8);
+                    if !data.is_null() && len <= 65536 {
+                        let value = std::slice::from_raw_parts(data, len as usize);
+                        selected.extend_from_slice(value);
+                    }
+                }
+                1 => {
                     let len = std::ptr::read_unaligned(node.add(24) as *const u32);
                     let data = std::ptr::read_unaligned(node.add(32) as *const *const u8);
                     if !data.is_null() && len <= 65536 {
@@ -212,7 +237,7 @@ unsafe fn parse_pending(head: *mut c_void) -> (Vec<u8>, Vec<u8>, u32) {
         tracing::warn!(target: "events", "pending input list exceeded 4096 nodes");
     }
     let cursor = cursor.unwrap_or(display.len() as u32);
-    (display, raw, cursor)
+    (selected, display, raw, cursor)
 }
 
 /// Session listener.
@@ -285,17 +310,19 @@ pub unsafe extern "C" fn listener(
             5 => {
                 // NB: do not call this local `display` - tracing's macros import
                 // `tracing::field::display`, which would shadow it.
-                let (pending_text, raw, cursor) = if payload.is_null() {
-                    (Vec::new(), Vec::new(), 0)
+                let (selected, pending_text, raw, cursor) = if payload.is_null() {
+                    (Vec::new(), Vec::new(), Vec::new(), 0)
                 } else {
                     unsafe { parse_pending(payload) }
                 };
                 tracing::debug!(
                     target: "events",
+                    selected = %String::from_utf8_lossy(&selected),
                     preedit = %String::from_utf8_lossy(&pending_text),
                     cursor,
                     "pending input"
                 );
+                snap.selected = selected;
                 snap.preedit = pending_text;
                 snap.raw = raw;
                 snap.cursor = cursor;
@@ -367,6 +394,41 @@ impl Sessions {
             Err(poisoned) => poisoned.into_inner(),
         };
         std::mem::take(&mut g.commits)
+    }
+
+    /// Prefix of this composition already committed by a partial select.
+    pub fn committed_prefix(&self, id: i64) -> Vec<u8> {
+        let Some(entry) = self.map.get(&id) else {
+            return Vec::new();
+        };
+        let g = match entry.shared.snapshot.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        g.committed_prefix.clone()
+    }
+
+    /// Record text that a partial select has just handed to the application.
+    pub fn append_committed_prefix(&self, id: i64, text: &[u8]) {
+        let Some(entry) = self.map.get(&id) else {
+            return;
+        };
+        let mut g = match entry.shared.snapshot.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        g.committed_prefix.extend_from_slice(text);
+    }
+
+    pub fn clear_committed_prefix(&self, id: i64) {
+        let Some(entry) = self.map.get(&id) else {
+            return;
+        };
+        let mut g = match entry.shared.snapshot.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        g.committed_prefix.clear();
     }
 }
 
@@ -512,10 +574,12 @@ mod tests {
                     cloud: false,
                 })
                 .collect(),
+            selected: Vec::new(),
             preedit: b"ni".to_vec(),
             raw: b"ni".to_vec(),
             cursor: 2,
             commits: Vec::new(),
+            committed_prefix: Vec::new(),
         };
         let wire = to_wire(3, &snap, 3);
         assert_eq!(wire.session, 3);

@@ -126,7 +126,8 @@ pub struct WetypeSelectResult {
     /// True when the composition ended; `rest` is empty then.
     pub finished: bool,
     /// Composition that is still open after a partial commit. The engine host
-    /// has already rebuilt the session, so this is an ordinary snapshot.
+    /// has already removed the committed prefix, so this is an ordinary
+    /// snapshot of the remaining suffix.
     pub rest: WetypeCandidates,
 }
 
