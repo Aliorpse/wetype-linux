@@ -101,7 +101,7 @@ preedit 直接用引擎给的 `ni'hao` 形式，不自己拼拼音。
 
 ## 智能拼写与模糊音
 
-这些是 `SessionConfig` 的本地字节，不依赖网络，已验证可被 wetype-linux 直接复刻：
+这些是 `SessionConfig` 的本地字节，不依赖网络：
 
 | 字节 | 含义 |
 |---|---|
