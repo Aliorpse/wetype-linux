@@ -1,10 +1,10 @@
 {
   "schema": 1,
   "comment": "Pinned WeType build this source tree is tested against. scripts/fetch_wetype.sh reads it; the engine host takes the app version from it at build time.",
-  "version": "3.0.2.44",
+  "version": "3.0.3.6",
   "platform": "windows-x86_64",
-  "url": "https://download.z.weixin.qq.com/app/win/WeTypeSetup_3.0.2.44_3.exe",
-  "installer_sha256": "dd8d160b0ece768c5d576e08dfcf2c510e0b340cec6869c16cce89ae40178aa5",
+  "url": "https://download.z.weixin.qq.com/app/win/WeTypeSetup_3.0.3.6_3.exe",
+  "installer_sha256": "da9026ce1b1ab8d0e009fefa0ba1b1b9d987b3f506257af74c6029250e9303e5",
   "engine_library": "libwxhld.dll",
-  "engine_sha256": "74d05926537a50651583d0597a926ffaeb5f70f91cc60b0151c4bc89c8c19172"
+  "engine_sha256": "4a916dcbb0c89f2962f6692d92e9a78916802d8fe9888de21286140e6ffd28df"
 }
